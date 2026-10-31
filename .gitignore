@@ -1,0 +1,44 @@
+# Local configuration and credentials
+.env
+.env.*
+!.env.example
+
+# Google Cloud credentials
+*.json
+!package.json
+project-*.json
+*-credentials.json
+service-account*.json
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.pytest_cache/
+.coverage
+htmlcov/
+venv/
+.venv/
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Runtime audio and editor files
+*.wav
+*.pcm
+*.mp3
+
+# IDE and OS
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Logs
+*.log
