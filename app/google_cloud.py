@@ -108,6 +108,26 @@ class GoogleCloudService:
             if result.alternatives and result.alternatives[0].transcript.strip()
         ).strip()
 
+    def streaming_recognition_config(self) -> speech.StreamingRecognitionConfig:
+        """Build a real-time Cloud Speech configuration for PCM from the ESP32."""
+
+        if self.settings.voice_sample_width != 2:
+            raise GoogleCloudConfigurationError("Cloud Speech input is configured for 16-bit PCM only.")
+        return speech.StreamingRecognitionConfig(
+            config=speech.RecognitionConfig(
+                encoding=speech.RecognitionConfig.AudioEncoding.LINEAR16,
+                sample_rate_hertz=self.settings.voice_sample_rate,
+                language_code=self.settings.speech_language,
+                alternative_language_codes=self.settings.speech_alternatives,
+                model=self.settings.speech_model,
+                enable_automatic_punctuation=True,
+                audio_channel_count=1,
+            ),
+            interim_results=True,
+            single_utterance=False,
+            enable_voice_activity_events=True,
+        )
+
     def generate_assistant_reply(self, prompt: str) -> str:
         """Generate one concise assistant reply through Vertex AI Gemini."""
 
@@ -116,12 +136,15 @@ class GoogleCloudService:
             contents=prompt,
             config=types.GenerateContentConfig(
                 temperature=0.3,
-                max_output_tokens=80,
+                max_output_tokens=self.settings.assistant_max_output_tokens,
+                automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
             ),
         )
-        text = (response.text or "").strip()
+        text = _extract_response_text(response)
         if not text:
-            raise RuntimeError("Vertex AI returned an empty response.")
+            details = _response_details(response)
+            LOGGER.warning("Vertex AI returned no text. %s", details)
+            raise RuntimeError(f"Vertex AI returned an empty response ({details}).")
         return text
 
     def synthesize_pcm(self, text: str) -> bytes:
@@ -152,3 +175,26 @@ class GoogleCloudService:
                 return wav_file.readframes(wav_file.getnframes())
         except wave.Error as exc:
             raise GoogleCloudConfigurationError("Cloud TTS returned invalid LINEAR16 audio.") from exc
+
+
+def _extract_response_text(response: object) -> str:
+    """Extract all textual candidate parts without relying on a convenience field."""
+
+    candidates = getattr(response, "candidates", None) or []
+    for candidate in candidates:
+        content = getattr(candidate, "content", None)
+        parts = getattr(content, "parts", None) or []
+        text = "".join((getattr(part, "text", None) or "") for part in parts).strip()
+        if text:
+            return text
+    return ""
+
+
+def _response_details(response: object) -> str:
+    """Produce safe diagnostic metadata for an empty Vertex response."""
+
+    candidates = getattr(response, "candidates", None) or []
+    finishes = [str(getattr(candidate, "finish_reason", "unknown")) for candidate in candidates]
+    feedback = getattr(response, "prompt_feedback", None)
+    block_reason = getattr(feedback, "block_reason", None) if feedback else None
+    return f"candidates={len(candidates)}, finish_reasons={finishes}, prompt_block={block_reason}"

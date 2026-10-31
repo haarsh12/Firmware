@@ -21,6 +21,7 @@
 #include <WiFi.h>
 #include <WebSocketsClient.h>
 #include <driver/i2s.h>
+#include <math.h>
 
 // ---------- CHANGE THESE VALUES ----------
 const char* WIFI_SSID = "YOUR_WIFI_SSID";
@@ -46,9 +47,17 @@ constexpr uint8_t SPEAKER_DIN_PIN = 19;
 #endif
 
 constexpr uint32_t SAMPLE_RATE = 16000;
-constexpr size_t MIC_SAMPLE_COUNT = 256;
+// 1,600 samples = a 100 ms 16 kHz frame. Google recommends frames around
+// 100 ms for a good real-time latency/efficiency balance.
+constexpr size_t MIC_FRAME_SAMPLES = 1600;
+constexpr size_t I2S_DMA_BUFFER_SAMPLES = 256;
 constexpr unsigned long DEBOUNCE_MS = 250;
 constexpr unsigned long PROCESS_TIMEOUT_MS = 35000;
+constexpr unsigned long MAX_RECORDING_MS = 25000;
+constexpr unsigned long MIN_RECORDING_MS = 500;
+constexpr unsigned long AUTO_STOP_SILENCE_MS = 1200;
+constexpr unsigned long AUDIO_DEBUG_INTERVAL_MS = 500;
+constexpr int SPEECH_RMS_THRESHOLD = 450;
 
 enum VoiceState { DISCONNECTED, IDLE, RECORDING, PROCESSING, PLAYING };
 VoiceState voiceState = DISCONNECTED;
@@ -56,6 +65,16 @@ WebSocketsClient webSocket;
 bool previousTouchState = false;
 unsigned long previousTouchEvent = 0;
 unsigned long processStartedAt = 0;
+unsigned long recordingStartedAt = 0;
+unsigned long lastSpeechAt = 0;
+unsigned long lastAudioDebugAt = 0;
+unsigned long sentAudioBytes = 0;
+unsigned long sentAudioFrames = 0;
+bool heardSpeech = false;
+
+// Keep these out of the loop stack; a 100 ms I2S frame needs 9.6 KB total.
+int32_t rawMicrophoneSamples[MIC_FRAME_SAMPLES];
+uint8_t pcmMicrophoneBytes[MIC_FRAME_SAMPLES * 2];
 
 #if ENABLE_SPEAKER
 int expectedAudioBytes = 0;
@@ -102,7 +121,7 @@ void setupMicrophone() {
   config.communication_format = I2S_COMM_FORMAT_STAND_I2S;
   config.intr_alloc_flags = ESP_INTR_FLAG_LEVEL1;
   config.dma_buf_count = 8;
-  config.dma_buf_len = MIC_SAMPLE_COUNT;
+  config.dma_buf_len = I2S_DMA_BUFFER_SAMPLES;
   config.use_apll = false;
   config.tx_desc_auto_clear = false;
   config.fixed_mclk = 0;
@@ -179,35 +198,70 @@ void beginRecording() {
     return;
   }
   setVoiceState(RECORDING);
+  recordingStartedAt = millis();
+  lastSpeechAt = recordingStartedAt;
+  lastAudioDebugAt = recordingStartedAt;
+  sentAudioBytes = 0;
+  sentAudioFrames = 0;
+  heardSpeech = false;
   webSocket.sendTXT("START");
-  showStatus("Listening - press button again to stop");
+  showStatus("Listening - speak now; silence auto-sends");
 }
 
-void stopRecording() {
+void stopRecording(const char* reason = "manual touch") {
+  if (voiceState != RECORDING) return;
   setVoiceState(PROCESSING);
   processStartedAt = millis();
   webSocket.sendTXT("STOP");
-  showStatus("Processing...");
+  Serial.printf("[VOICE] Recording stopped (%s): frames=%lu bytes=%lu duration=%.2fs\n",
+                reason, sentAudioFrames, sentAudioBytes,
+                (millis() - recordingStartedAt) / 1000.0);
+  showStatus("Processing streamed transcript...");
 }
 
 void sendMicrophoneFrame() {
-  int32_t rawSamples[MIC_SAMPLE_COUNT];
   size_t bytesRead = 0;
-  const esp_err_t result = i2s_read(I2S_NUM_0, rawSamples, sizeof(rawSamples), &bytesRead, portMAX_DELAY);
+  const esp_err_t result = i2s_read(
+      I2S_NUM_0, rawMicrophoneSamples, sizeof(rawMicrophoneSamples), &bytesRead, portMAX_DELAY);
   if (result != ESP_OK || bytesRead == 0) return;
 
   // INMP441 provides 24-bit data in a 32-bit I2S frame. Convert it to signed
   // 16-bit little-endian PCM, matching VOICE_SAMPLE_RATE=16000 and
   // VOICE_SAMPLE_WIDTH=2 in new_backend/.env.
-  uint8_t pcmBytes[MIC_SAMPLE_COUNT * 2];
   size_t pcmLength = 0;
   const size_t count = bytesRead / sizeof(int32_t);
+  int64_t sumSquares = 0;
   for (size_t i = 0; i < count; ++i) {
-    const int16_t sample = static_cast<int16_t>(rawSamples[i] >> 16);
-    pcmBytes[pcmLength++] = static_cast<uint8_t>(sample & 0xFF);
-    pcmBytes[pcmLength++] = static_cast<uint8_t>((sample >> 8) & 0xFF);
+    const int16_t sample = static_cast<int16_t>(rawMicrophoneSamples[i] >> 16);
+    sumSquares += static_cast<int64_t>(sample) * sample;
+    pcmMicrophoneBytes[pcmLength++] = static_cast<uint8_t>(sample & 0xFF);
+    pcmMicrophoneBytes[pcmLength++] = static_cast<uint8_t>((sample >> 8) & 0xFF);
   }
-  if (pcmLength > 0) webSocket.sendBIN(pcmBytes, pcmLength);
+
+  if (pcmLength > 0 && webSocket.isConnected()) {
+    webSocket.sendBIN(pcmMicrophoneBytes, pcmLength);
+    sentAudioBytes += pcmLength;
+    sentAudioFrames++;
+  }
+
+  const int rms = count ? static_cast<int>(sqrt(static_cast<double>(sumSquares) / count)) : 0;
+  const unsigned long now = millis();
+  if (rms >= SPEECH_RMS_THRESHOLD) {
+    heardSpeech = true;
+    lastSpeechAt = now;
+  }
+  if (now - lastAudioDebugAt >= AUDIO_DEBUG_INTERVAL_MS) {
+    Serial.printf("[AUDIO] frame=%lu rms=%d speech=%s bytes=%lu\n",
+                  sentAudioFrames, rms, rms >= SPEECH_RMS_THRESHOLD ? "yes" : "no", sentAudioBytes);
+    lastAudioDebugAt = now;
+  }
+
+  if (now - recordingStartedAt >= MAX_RECORDING_MS) {
+    stopRecording("maximum recording time");
+  } else if (heardSpeech && now - recordingStartedAt >= MIN_RECORDING_MS &&
+             now - lastSpeechAt >= AUTO_STOP_SILENCE_MS) {
+    stopRecording("speech silence detected");
+  }
 }
 
 void webSocketEvent(WStype_t type, uint8_t* payload, size_t length) {
@@ -231,6 +285,30 @@ void webSocketEvent(WStype_t type, uint8_t* payload, size_t length) {
       showStatus(text.substring(4));
       return;
     }
+    if (text.startsWith("STATUS:")) {
+      Serial.printf("[BACKEND STATUS] %s\n", text.substring(7).c_str());
+      return;
+    }
+    if (text.startsWith("DEBUG:")) {
+      Serial.printf("[BACKEND DEBUG] %s\n", text.substring(6).c_str());
+      return;
+    }
+    if (text.startsWith("PARTIAL:")) {
+      Serial.printf("[PARTIAL TRANSCRIPT] %s\n", text.substring(8).c_str());
+      return;
+    }
+    if (text.startsWith("FINAL:")) {
+      Serial.printf("[FINAL TRANSCRIPT] %s\n", text.substring(6).c_str());
+      return;
+    }
+    if (text.startsWith("REPLY:")) {
+      Serial.printf("[ASSISTANT REPLY] %s\n", text.substring(6).c_str());
+      return;
+    }
+    if (text.startsWith("ERROR:")) {
+      Serial.printf("[BACKEND ERROR] %s\n", text.substring(6).c_str());
+      return;
+    }
     if (text == "VOICE_DONE") {
       setVoiceState(IDLE);
       showStatus("Ready");
@@ -248,7 +326,7 @@ void webSocketEvent(WStype_t type, uint8_t* payload, size_t length) {
       expectedAudioBytes = 0;
       receivedAudioBytes = 0;
       speakerHasOddByte = false;
-      voiceState = PLAYING;
+      setVoiceState(PLAYING);
       return;
     }
     if (waitingForAudioSize) {
@@ -265,7 +343,7 @@ void webSocketEvent(WStype_t type, uint8_t* payload, size_t length) {
     playPcmBytes(payload, length);
     receivedAudioBytes += length;
     if (expectedAudioBytes > 0 && receivedAudioBytes >= expectedAudioBytes) {
-      voiceState = IDLE;
+      setVoiceState(IDLE);
       showStatus("Ready");
     }
   }

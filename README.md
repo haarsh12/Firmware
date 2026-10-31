@@ -15,7 +15,9 @@ ignored by Git.
   `/api/device/status`, `/app/sensors`, and `/app/relay`.
 - ESP32 compatibility endpoints: `/sensors/data`, `/api/sensors/update`, and
   a relay channel at `/ws/relay`.
-- Voice channel at `/ws/voice` for 16 kHz, 16-bit, mono PCM audio.
+- Voice channel at `/ws/voice` for 16 kHz, 16-bit, mono PCM audio. It streams
+  interim transcript updates as you speak, instead of waiting to upload an
+  entire recording first.
 - A deterministic relay parser: the LLM cannot decide which physical device to
   switch; only direct user phrases such as `light on`, `batti band`, and
   `pankha chalu` create commands.
@@ -69,8 +71,10 @@ Start-up validates that the file can be loaded. Then visit:
    `172.20.10.14`; update it if the hotspot/DHCP address changes.
 3. Confirm the GPIO wiring / relay active-level constants match your board.
 4. Upload the relay sketch first. `/health` should report one relay connection.
-5. Upload the INMP441 sketch. Press its button once to record and again to
-   send the request. Its serial monitor displays the transcript and response.
+5. Upload the INMP441 sketch. One touch starts a voice turn. After you finish
+   speaking, 1.2 seconds of silence sends it automatically; a second touch is
+   still available as a manual stop. Its Serial Monitor shows live partial
+   transcripts, final transcript, audio frame diagnostics, and response.
 
 For an internet-hosted backend, ESP32 boards need TLS (`wss://`/`https://`).
 These supplied sketches target a trusted local LAN using `ws://` and `http://`.
@@ -81,7 +85,9 @@ Do not expose the local backend directly to the public internet.
 The relay board sends `{"type":"relay_status","light":true,"fan":false}`.
 The backend sends `{"type":"relay_command","device":"light","state":true}`.
 
-The voice board sends the following sequence:
+The voice board sends the following sequence. Binary frames are sent live at
+roughly 100 ms per frame, so Cloud Speech can produce partial transcript
+updates before recording ends:
 
 ```text
 START
@@ -89,7 +95,8 @@ START
 STOP
 ```
 
-The backend sends `TRANSCRIPT:...`, `LCD:...`, and, only when TTS is enabled,
+The backend sends `PARTIAL:...`, `FINAL:...`, `TRANSCRIPT:...`, `REPLY:...`,
+`STATUS:...`, and `LCD:...`. Only when TTS is enabled it also sends
 `AUDIO_START`, byte count, and raw 16-bit PCM chunks. Every voice turn ends
 with `VOICE_DONE`; the microphone firmware then returns to Ready.
 
