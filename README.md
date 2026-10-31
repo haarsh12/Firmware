@@ -23,6 +23,8 @@ ignored by Git.
   `pankha chalu` create commands.
 - Complete sketches at `firmware/esp32_relay/esp32_relay.ino` and
   `firmware/esp32_inmp441_voice/esp32_inmp441_voice.ino`.
+- A hardware-only MAX98357A test sketch at
+  `test_code/max98357a_speaker_test/max98357a_speaker_test.ino`.
 
 ## Google Cloud preparation
 
@@ -62,7 +64,8 @@ Start-up validates that the file can be loaded. Then visit:
 
 ## ESP32 flashing
 
-1. Install Arduino libraries **WebSockets** (Links2004) and **ArduinoJson 6**.
+1. Install Arduino libraries **WebSockets** (Links2004), **ArduinoJson 6**,
+   and **LiquidCrystal_I2C** for the full voice-agent LCD.
    The relay sketch also requires **DHT sensor library by Adafruit** when its
    `ENABLE_DHT_SENSOR` setting is left as `1`.
 2. Edit `WIFI_SSID`, `WIFI_PASSWORD`, `BACKEND_HOST`, and `BACKEND_PORT` in
@@ -71,10 +74,24 @@ Start-up validates that the file can be loaded. Then visit:
    `172.20.10.14`; update it if the hotspot/DHCP address changes.
 3. Confirm the GPIO wiring / relay active-level constants match your board.
 4. Upload the relay sketch first. `/health` should report one relay connection.
-5. Upload the INMP441 sketch. One touch starts a voice turn. After you finish
-   speaking, 1.2 seconds of silence sends it automatically; a second touch is
-   still available as a manual stop. Its Serial Monitor shows live partial
-   transcripts, final transcript, audio frame diagnostics, and response.
+5. Wire the MAX98357A and LCD using [firmware/WIRING.md](firmware/WIRING.md),
+   then upload the INMP441 sketch. One touch starts a voice turn. It waits at
+   least 8 seconds before it can auto-stop on silence; a second touch is always
+   available as a manual stop. The speaker plays Cloud TTS and the LCD rolls
+   Latin-script response words across its two lines. Its Serial Monitor shows
+   partial/final transcripts, audio frame diagnostics, and response status.
+
+## Test the MAX98357A speaker first
+
+1. Start this backend and keep its terminal open.
+2. Set only Wi-Fi credentials in
+   `test_code/max98357a_speaker_test/max98357a_speaker_test.ino`.
+3. Flash that sketch. It automatically asks `/ws/speaker-test` to play
+   **“Hello world, how are you?”** using Cloud TTS.
+4. In Serial Monitor at 115200, confirm `AUDIO_START`, a positive PCM byte
+   count, and `PCM playback complete`. If the speaker is silent, stop and
+   check the wiring/power checklist in [firmware/WIRING.md](firmware/WIRING.md)
+   before flashing the full voice-agent firmware.
 
 For an internet-hosted backend, ESP32 boards need TLS (`wss://`/`https://`).
 These supplied sketches target a trusted local LAN using `ws://` and `http://`.

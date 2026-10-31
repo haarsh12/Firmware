@@ -38,7 +38,7 @@ class Settings(BaseSettings):
 
     voice_sample_rate: int = Field(default=16000, ge=8000, le=48000)
     voice_sample_width: int = Field(default=2, ge=2, le=4)
-    voice_max_audio_seconds: int = Field(default=25, ge=1, le=240)
+    voice_max_audio_seconds: int = Field(default=60, ge=8, le=240)
     speech_language: str = "hi-IN"
     speech_alternative_languages: str = "en-IN"
     speech_model: str = "latest_long"
@@ -48,10 +48,11 @@ class Settings(BaseSettings):
     tts_language: str = "hi-IN"
     tts_voice_name: str = ""
     tts_sample_rate: int = Field(default=16000, ge=8000, le=48000)
+    tts_timeout_seconds: float = Field(default=25.0, ge=5.0, le=90.0)
 
     esp32_http_base_url: str = ""
     max_assistant_words: int = Field(default=45, ge=3, le=100)
-    assistant_max_output_tokens: int = Field(default=256, ge=32, le=1024)
+    assistant_max_output_tokens: int = Field(default=512, ge=128, le=1024)
 
     @property
     def is_production(self) -> bool:

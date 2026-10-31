@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import io
+import json
 import logging
 import wave
+from dataclasses import dataclass
 from functools import cached_property
 
 from google import genai
@@ -21,6 +23,14 @@ _CLOUD_PLATFORM_SCOPE = "https://www.googleapis.com/auth/cloud-platform"
 
 class GoogleCloudConfigurationError(RuntimeError):
     """Raised when service-account configuration cannot be used."""
+
+
+@dataclass(frozen=True, slots=True)
+class GeneratedAssistantReply:
+    """Model result with Latin LCD text and natural text for Cloud TTS."""
+
+    display_text: str
+    speech_text: str
 
 
 class GoogleCloudService:
@@ -128,8 +138,8 @@ class GoogleCloudService:
             enable_voice_activity_events=True,
         )
 
-    def generate_assistant_reply(self, prompt: str) -> str:
-        """Generate one concise assistant reply through Vertex AI Gemini."""
+    def generate_assistant_reply(self, prompt: str) -> GeneratedAssistantReply:
+        """Generate separate LCD and Hindi/English TTS reply fields via Vertex."""
 
         response = self.vertex_client.models.generate_content(
             model=self.settings.vertex_gemini_model,
@@ -138,6 +148,25 @@ class GoogleCloudService:
                 temperature=0.3,
                 max_output_tokens=self.settings.assistant_max_output_tokens,
                 automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
+                # The agent performs no tool calls or multi-step reasoning.
+                # Disabling the default thinking budget reserves output tokens
+                # for the required display_text/speech_text JSON fields.
+                thinking_config=types.ThinkingConfig(thinking_budget=0),
+                response_mime_type="application/json",
+                response_json_schema={
+                    "type": "object",
+                    "properties": {
+                        "display_text": {
+                            "type": "string",
+                            "description": "Complete Latin-script Hinglish or English text for a 16x2 LCD.",
+                        },
+                        "speech_text": {
+                            "type": "string",
+                            "description": "Same meaning in natural Hindi Devanagari or English for TTS.",
+                        },
+                    },
+                    "required": ["display_text", "speech_text"],
+                },
             ),
         )
         text = _extract_response_text(response)
@@ -145,7 +174,15 @@ class GoogleCloudService:
             details = _response_details(response)
             LOGGER.warning("Vertex AI returned no text. %s", details)
             raise RuntimeError(f"Vertex AI returned an empty response ({details}).")
-        return text
+        try:
+            payload = json.loads(text)
+            display_text = str(payload["display_text"]).strip()
+            speech_text = str(payload["speech_text"]).strip()
+        except (json.JSONDecodeError, KeyError, TypeError, ValueError) as exc:
+            raise RuntimeError("Vertex AI did not return the required reply JSON fields.") from exc
+        if not display_text or not speech_text:
+            raise RuntimeError("Vertex AI returned blank display or speech text.")
+        return GeneratedAssistantReply(display_text=display_text, speech_text=speech_text)
 
     def synthesize_pcm(self, text: str) -> bytes:
         """Synthesize 16-bit mono PCM for an optional I2S speaker.

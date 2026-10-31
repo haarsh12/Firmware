@@ -9,7 +9,7 @@ from uuid import uuid4
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
-from app.assistant import build_prompt, fallback_reply, limit_reply
+from app.assistant import build_prompt, fallback_assistant_reply, limit_reply
 from app.command_parser import parse_relay_commands
 from app.relay_manager import RelayManager, RelayUnavailableError
 from app.state import SmartHomeState
@@ -47,6 +47,7 @@ async def _send_audio(websocket: WebSocket, pcm_audio: bytes, send_lock: asyncio
         except Exception:
             return False
         await asyncio.sleep(0.002)
+    await _send_text(websocket, "AUDIO_END", send_lock)
     return True
 
 
@@ -92,14 +93,18 @@ async def _answer_final_transcript(
 
     generation_started = perf_counter()
     try:
-        reply = await asyncio.to_thread(
+        model_reply = await asyncio.to_thread(
             cloud.generate_assistant_reply,
             build_prompt(transcript, sensors, relays, commands, conversation_history),
         )
+        reply = model_reply.display_text
+        speech_reply = model_reply.speech_text
         LOGGER.info("[%s] Vertex reply completed in %.2fs", session_id, perf_counter() - generation_started)
     except Exception:
         LOGGER.exception("[%s] Vertex AI generation failed; using local response", session_id)
-        reply = fallback_reply(commands)
+        model_reply = fallback_assistant_reply(commands)
+        reply = model_reply.display_text
+        speech_reply = model_reply.speech_text
 
     relay_errors: list[str] = []
     for command in commands:
@@ -111,6 +116,7 @@ async def _answer_final_transcript(
 
     if relay_errors:
         reply = f"{', '.join(relay_errors)} relay board connected nahi hai."
+        speech_reply = reply
     reply = limit_reply(reply, settings.max_assistant_words)
     conversation_history.append((transcript, reply))
     del conversation_history[:-6]
@@ -119,13 +125,24 @@ async def _answer_final_transcript(
     if not await _send_text(websocket, f"LCD:{reply}", send_lock):
         return
 
-    # A mic-only board should set ENABLE_CLOUD_TTS=false. This avoids a
-    # needless extra cloud request, reducing turn latency significantly.
+    # Keep ENABLE_CLOUD_TTS=true for the MAX98357A speaker firmware. A
+    # microphone-only board may set it false to skip this cloud request.
     if settings.enable_cloud_tts:
         await _send_text(websocket, "STATUS:Generating audio reply", send_lock)
         try:
-            pcm_reply = await asyncio.to_thread(cloud.synthesize_pcm, reply)
-            await _send_audio(websocket, pcm_reply, send_lock)
+            LOGGER.info("[%s] Cloud TTS generating %s characters", session_id, len(speech_reply))
+            pcm_reply = await asyncio.wait_for(
+                asyncio.to_thread(cloud.synthesize_pcm, speech_reply),
+                timeout=settings.tts_timeout_seconds,
+            )
+            LOGGER.info(
+                "[%s] Cloud TTS generated %s PCM bytes in %.2fs",
+                session_id,
+                len(pcm_reply),
+                perf_counter() - generation_started,
+            )
+            sent = await _send_audio(websocket, pcm_reply, send_lock)
+            LOGGER.info("[%s] TTS audio sent=%s bytes=%s", session_id, sent, len(pcm_reply))
         except Exception:
             LOGGER.exception("[%s] Cloud TTS failed; the text reply was delivered", session_id)
 

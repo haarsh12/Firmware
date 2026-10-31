@@ -12,7 +12,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.config import get_settings
 from app.google_cloud import GoogleCloudService
 from app.relay_manager import RelayManager
-from app.routers import sensors, voice
+from app.routers import sensors, speaker_test, voice
 from app.state import SmartHomeState
 
 
@@ -69,6 +69,7 @@ app.add_middleware(
 
 app.include_router(sensors.router)
 app.include_router(voice.router)
+app.include_router(speaker_test.router)
 
 
 @app.get("/", tags=["health"])
