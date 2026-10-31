@@ -30,7 +30,7 @@
 // ---------- CHANGE ONLY YOUR WIFI VALUES ----------
 const char* WIFI_SSID = "Harsh's Galaxy A21s";
 const char* WIFI_PASSWORD = "datachor";
-const char* BACKEND_HOST = "192.168.134.207";  // Laptop Wi-Fi / hotspot IPv4
+const char* BACKEND_HOST = "192.168.216.207";  // Laptop Wi-Fi / hotspot IPv4
 const uint16_t BACKEND_PORT = 8000;
 // ---------------------------------------------------
 
@@ -64,6 +64,9 @@ constexpr unsigned long PROCESS_TIMEOUT_MS = 80000;
 constexpr unsigned long AUDIO_DEBUG_INTERVAL_MS = 500;
 constexpr int SPEECH_RMS_THRESHOLD = 1000;
 constexpr float SPEAKER_GAIN = 1.6F;
+// Temporary diagnostic: a short 1 kHz tone before each cloud reply proves
+// that the full firmware's MAX98357A output path is physically audible.
+constexpr bool SPEAKER_DIAGNOSTIC_TONE = true;
 
 enum VoiceState { DISCONNECTED, IDLE, RECORDING, PROCESSING, PLAYING };
 
@@ -86,6 +89,10 @@ int receivedAudioBytes = 0;
 bool waitingForAudioSize = false;
 bool speakerHasOddByte = false;
 uint8_t speakerOddByte = 0;
+bool microphoneInstalled = false;
+bool microphoneRunning = false;
+size_t speakerI2sWrittenBytes = 0;
+unsigned long speakerI2sWriteErrors = 0;
 
 // Static storage avoids overflowing the ESP32 loop stack.
 int32_t rawMicrophoneSamples[MIC_FRAME_SAMPLES];
@@ -236,6 +243,8 @@ void setupMicrophone() {
   const esp_err_t installResult = i2s_driver_install(I2S_NUM_0, &config, 0, nullptr);
   const esp_err_t pinResult = i2s_set_pin(I2S_NUM_0, &pins);
   i2s_zero_dma_buffer(I2S_NUM_0);
+  microphoneInstalled = installResult == ESP_OK && pinResult == ESP_OK;
+  microphoneRunning = microphoneInstalled;
   Serial.printf("[MIC] I2S install=%d pins=%d\n", installResult, pinResult);
 }
 
@@ -282,7 +291,10 @@ void playPcmBytes(uint8_t* payload, size_t length) {
     index += 2;
     if (sampleCount == 128) {
       size_t written = 0;
-      i2s_write(I2S_NUM_1, samples, sampleCount * sizeof(int16_t), &written, portMAX_DELAY);
+      const esp_err_t result = i2s_write(
+          I2S_NUM_1, samples, sampleCount * sizeof(int16_t), &written, portMAX_DELAY);
+      speakerI2sWrittenBytes += written;
+      if (result != ESP_OK || written != sampleCount * sizeof(int16_t)) speakerI2sWriteErrors++;
       sampleCount = 0;
     }
   }
@@ -292,8 +304,50 @@ void playPcmBytes(uint8_t* payload, size_t length) {
   }
   if (sampleCount > 0) {
     size_t written = 0;
-    i2s_write(I2S_NUM_1, samples, sampleCount * sizeof(int16_t), &written, portMAX_DELAY);
+    const esp_err_t result = i2s_write(
+        I2S_NUM_1, samples, sampleCount * sizeof(int16_t), &written, portMAX_DELAY);
+    speakerI2sWrittenBytes += written;
+    if (result != ESP_OK || written != sampleCount * sizeof(int16_t)) speakerI2sWriteErrors++;
   }
+}
+
+void playSpeakerDiagnosticTone() {
+  if (!SPEAKER_DIAGNOSTIC_TONE) return;
+  constexpr size_t TONE_SAMPLES = 1600;  // 100 ms at 16 kHz
+  constexpr float PI_F = 3.14159265F;
+  int16_t tone[160];
+  for (size_t block = 0; block < TONE_SAMPLES / 160; ++block) {
+    for (size_t index = 0; index < 160; ++index) {
+      const float phase = 2.0F * PI_F * 1000.0F * (block * 160 + index) / SAMPLE_RATE;
+      tone[index] = static_cast<int16_t>(sinf(phase) * 5000.0F);
+    }
+    size_t written = 0;
+    const esp_err_t result = i2s_write(I2S_NUM_1, tone, sizeof(tone), &written, portMAX_DELAY);
+    speakerI2sWrittenBytes += written;
+    if (result != ESP_OK || written != sizeof(tone)) speakerI2sWriteErrors++;
+  }
+  Serial.println("[SPEAKER] Diagnostic tone queued");
+}
+
+void prepareSpeakerForPlayback() {
+  // Some ESP32 Arduino-core/board combinations do not reliably drive I2S1
+  // when I2S0 (the INMP441 receiver) remains installed, even if I2S0 is
+  // stopped. Fully release the microphone peripheral, then freshly install
+  // the known-working MAX98357A configuration from the standalone test.
+  if (microphoneInstalled) {
+    if (microphoneRunning) {
+      const esp_err_t stopResult = i2s_stop(I2S_NUM_0);
+      Serial.printf("[MIC] I2S paused for speaker=%d\n", stopResult);
+    }
+    const esp_err_t uninstallResult = i2s_driver_uninstall(I2S_NUM_0);
+    Serial.printf("[MIC] I2S released for speaker=%d\n", uninstallResult);
+    microphoneInstalled = false;
+    microphoneRunning = false;
+  }
+
+  const esp_err_t speakerUninstallResult = i2s_driver_uninstall(I2S_NUM_1);
+  Serial.printf("[SPEAKER] I2S reset=%d\n", speakerUninstallResult);
+  setupSpeaker();
 }
 
 void beginRecording() {
@@ -303,6 +357,19 @@ void beginRecording() {
     return;
   }
   setVoiceState(RECORDING);
+  if (!microphoneInstalled) {
+    setupMicrophone();
+  }
+  if (!microphoneRunning) {
+    const esp_err_t result = i2s_start(I2S_NUM_0);
+    microphoneRunning = result == ESP_OK;
+    Serial.printf("[MIC] I2S resume=%d\n", result);
+    if (!microphoneRunning) {
+      logVoice("Microphone could not resume");
+      setVoiceState(IDLE);
+      return;
+    }
+  }
   setAiResponding(false);
   recordingStartedAt = millis();
   lastSpeechAt = recordingStartedAt;
@@ -321,6 +388,8 @@ void stopRecording(const char* reason = "manual touch") {
   setVoiceState(PROCESSING);
   setAiResponding(true);
   processStartedAt = millis();
+  // Do not keep the INMP441 receiver clocking while MAX98357A is playing.
+  // This avoids peripheral/DMA contention on ESP32 Arduino core versions.
   webSocket.sendTXT("STOP");
   Serial.printf("[VOICE] Recording stopped (%s): frames=%lu bytes=%lu duration=%.2fs\n",
                 reason, sentAudioFrames, sentAudioBytes,
@@ -455,13 +524,19 @@ void webSocketEvent(WStype_t type, uint8_t* payload, size_t length) {
       expectedAudioBytes = 0;
       receivedAudioBytes = 0;
       speakerHasOddByte = false;
+      speakerI2sWrittenBytes = 0;
+      speakerI2sWriteErrors = 0;
+      i2s_zero_dma_buffer(I2S_NUM_1);
+      prepareSpeakerForPlayback();
       setAiResponding(true);
       setVoiceState(PLAYING);
       Serial.println("[SPEAKER] Receiving TTS audio");
+      playSpeakerDiagnosticTone();
       return;
     }
     if (text == "AUDIO_END") {
-      Serial.printf("[SPEAKER] TTS stream ended: %d bytes\n", receivedAudioBytes);
+      Serial.printf("[SPEAKER] TTS stream ended: received=%d i2s_written=%u write_errors=%lu\n",
+                    receivedAudioBytes, static_cast<unsigned>(speakerI2sWrittenBytes), speakerI2sWriteErrors);
       return;
     }
     if (waitingForAudioSize) {

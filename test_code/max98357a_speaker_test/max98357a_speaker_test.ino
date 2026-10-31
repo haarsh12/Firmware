@@ -26,7 +26,7 @@
 // ---------- CHANGE ONLY YOUR WIFI VALUES ----------
 const char* WIFI_SSID = "Harsh's Galaxy A21s";
 const char* WIFI_PASSWORD = "datachor";
-const char* BACKEND_HOST = "192.168.134.207";  // Laptop Wi-Fi / hotspot IPv4
+const char* BACKEND_HOST = "192.168.216.207";  // Laptop Wi-Fi / hotspot IPv4
 const uint16_t BACKEND_PORT = 8000;
 // ---------------------------------------------------
 
