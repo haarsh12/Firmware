@@ -6,7 +6,8 @@ API key with the supplied Google Cloud service-account JSON. The key is read in
 place, never copied into this project, and `.env`/JSON credential files are
 ignored by Git.
 
-## What is included
+## What is included .
+
 
 - FastAPI backend using a service account for Vertex AI Gemini, Cloud
   Speech-to-Text, and optional Cloud Text-to-Speech.
