@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import asyncio
 from contextlib import asynccontextmanager
 
 import uvicorn
@@ -14,6 +15,8 @@ from app.google_cloud import GoogleCloudService
 from app.relay_manager import RelayManager
 from app.routers import sensors, speaker_test, voice
 from app.state import SmartHomeState
+from xiaozhi_connect.mcp_server import router as xiaozhi_mcp_router
+from xiaozhi_connect.outbound_bridge import XiaozhiOutboundBridge
 
 
 def _configure_logging() -> None:
@@ -40,7 +43,18 @@ async def lifespan(app: FastAPI):
         LOGGER.info("Google Cloud service-account credentials are configured for Vertex AI project %s.", google_cloud.project_id)
     else:
         LOGGER.warning("Google Cloud services are unavailable: %s", detail)
-    yield
+    bridge = XiaozhiOutboundBridge(app)
+    app.state.xiaozhi_bridge = bridge
+    bridge_task = asyncio.create_task(bridge.run(), name="xiaozhi-outbound-mcp")
+    try:
+        yield
+    finally:
+        await bridge.stop()
+        bridge_task.cancel()
+        try:
+            await bridge_task
+        except asyncio.CancelledError:
+            pass
 
 
 app = FastAPI(
@@ -55,6 +69,7 @@ app.state.google_cloud = google_cloud
 app.state.relay_manager = relay_manager
 app.state.google_cloud_configured = False
 app.state.google_cloud_detail = "Startup validation has not run."
+app.state.xiaozhi_bridge = None
 
 origins = settings.allowed_origins
 if settings.is_production and (not origins or "*" in origins):
@@ -70,6 +85,7 @@ app.add_middleware(
 app.include_router(sensors.router)
 app.include_router(voice.router)
 app.include_router(speaker_test.router)
+app.include_router(xiaozhi_mcp_router)
 
 
 @app.get("/", tags=["health"])
@@ -84,6 +100,7 @@ async def root() -> dict[str, object]:
             "relay_control": "/api/device/control",
             "voice_ws": "/ws/voice",
             "relay_ws": "/ws/relay",
+            "xiaozhi_mcp": "/xiaozhi/mcp",
         },
     }
 
@@ -96,6 +113,12 @@ async def health() -> dict[str, object]:
         "google_cloud_configured": app.state.google_cloud_configured,
         "google_cloud_detail": app.state.google_cloud_detail,
         "relay_board_connections": await relay_manager.connection_count(),
+        "xiaozhi_mcp_enabled": settings.xiaozhi_mcp_enabled,
+        "xiaozhi_outbound_bridge": (
+            app.state.xiaozhi_bridge.status.public_dict()
+            if app.state.xiaozhi_bridge is not None
+            else {"configured": False, "connected": False, "last_event": "Startup pending."}
+        ),
     }
 
 

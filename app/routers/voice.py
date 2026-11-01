@@ -205,7 +205,23 @@ async def voice_websocket(websocket: WebSocket) -> None:
 
     try:
         while True:
-            message = await websocket.receive()
+            # Do not leave a Google streaming-recognition request open if an
+            # ESP32 Wi-Fi/I2S glitch stops PCM frames without transmitting its
+            # normal STOP marker. Cloud Speech requires near-real-time audio.
+            try:
+                message = await asyncio.wait_for(websocket.receive(), timeout=2.0)
+            except asyncio.TimeoutError:
+                if recording and session is not None and session.seconds_since_last_audio >= 3.0:
+                    recording = False
+                    session.close_input()
+                    LOGGER.warning(
+                        "[%s] voice stream stalled for %.1fs; closing input safely",
+                        session.session_id,
+                        session.seconds_since_last_audio,
+                    )
+                    await _send_text(websocket, "STATUS:Audio paused; finalizing what was heard", send_lock)
+                    await _send_text(websocket, "LCD:Finalizing...", send_lock)
+                continue
             if message.get("type") == "websocket.disconnect":
                 break
 

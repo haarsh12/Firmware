@@ -37,6 +37,14 @@ async def push_sensor_data(data: SensorData, request: Request) -> dict[str, str]
     """Accept sensor readings from either current or legacy ESP32 firmware."""
 
     await _state(request).set_sensors(data)
+    LOGGER.info(
+        "Relay ESP32 sensor update: temperature=%.1fC humidity=%.1f%% mq_analog=%s mq_digital=%s ldr=%s",
+        data.temperature,
+        data.humidity,
+        data.mq_analog,
+        data.mq_digital,
+        data.ldr,
+    )
     return {"status": "ok"}
 
 
@@ -147,6 +155,11 @@ async def relay_websocket(websocket: WebSocket) -> None:
                 continue
             if payload.get("type") in {"relay_status", "status"}:
                 await manager.apply_board_status(payload)
+                LOGGER.info(
+                    "Relay ESP32 status received: light=%s fan=%s",
+                    payload.get("light"),
+                    payload.get("fan"),
+                )
     except WebSocketDisconnect:
         pass
     finally:

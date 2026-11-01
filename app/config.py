@@ -50,6 +50,14 @@ class Settings(BaseSettings):
     tts_sample_rate: int = Field(default=16000, ge=8000, le=48000)
     tts_timeout_seconds: float = Field(default=25.0, ge=5.0, le=90.0)
 
+    # Xiaozhi is optional. It is a separate MCP control surface and never
+    # replaces the Google/Vertex voice endpoint above.
+    xiaozhi_mcp_enabled: bool = True
+    xiaozhi_mcp_shared_secret: str = ""
+    xiaozhi_mcp_allow_unauthenticated: bool = False
+    xiaozhi_cloud_mcp_url: str = ""
+    xiaozhi_mcp_reconnect_max_seconds: int = Field(default=30, ge=2, le=300)
+
     esp32_http_base_url: str = ""
     max_assistant_words: int = Field(default=45, ge=3, le=100)
     assistant_max_output_tokens: int = Field(default=512, ge=128, le=1024)

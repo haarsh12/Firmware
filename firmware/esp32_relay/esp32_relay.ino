@@ -6,9 +6,17 @@
     - ArduinoJson 6.x
     - DHT sensor library by Adafruit (only when ENABLE_DHT_SENSOR is 1)
 
-  Set Wi-Fi and backend address below before flashing.  The relay board keeps a
-  WebSocket at ws://BACKEND_HOST:BACKEND_PORT/ws/relay and sends HTTP sensor
-  updates to /sensors/data.
+  This replaces the old Bluetooth-only sketch. The relay board keeps a
+  WebSocket at ws://BACKEND_HOST:BACKEND_PORT/ws/relay, so Xiaozhi and the
+  Google/Vertex backend can both command the same physical relays.
+
+  Current wiring from the original working board:
+    touch 1 = GPIO 18, touch 2 = GPIO 19
+    relay 1 (light) = GPIO 27, relay 2 (fan) = GPIO 26
+    DHT11 data = GPIO 32
+
+  MQ-2 support is included but disabled until the sensor is wired.  Set
+  ENABLE_MQ2_SENSOR to 1 and select the two pins once it is installed.
 */
 
 #include <WiFi.h>
@@ -17,30 +25,36 @@
 #include <ArduinoJson.h>
 
 #define ENABLE_DHT_SENSOR 1
+#define ENABLE_MQ2_SENSOR 0
+#define ENABLE_LDR_SENSOR 0
 #if ENABLE_DHT_SENSOR
   #include <DHT.h>
 #endif
 
 // ---------- CHANGE THESE VALUES ----------
-const char* WIFI_SSID = "YOUR_WIFI_SSID";
-const char* WIFI_PASSWORD = "YOUR_WIFI_PASSWORD";
-const char* BACKEND_HOST = "192.168.1.100";
+const char* WIFI_SSID = "Harsh's Galaxy A21s";
+const char* WIFI_PASSWORD = "datachor";
+// Current laptop Wi-Fi IPv4 as of the last backend configuration. Change this
+// only if Windows reports a different Wi-Fi IPv4 address after reconnecting.
+const char* BACKEND_HOST = "192.168.50.207";
 const uint16_t BACKEND_PORT = 8000;
 // ----------------------------------------
 
-// Set true for relay boards where LOW energizes the relay.
-const bool RELAY_ACTIVE_LOW = true;
+// Your original Bluetooth sketch used HIGH = ON, so this must remain false.
+// Change it to true only if a future relay board behaves in reverse.
+const bool RELAY_ACTIVE_LOW = false;
 
 // Adjust pins to match your board. Avoid ESP32 boot-strapping pins.
-constexpr uint8_t LIGHT_RELAY_PIN = 5;
-constexpr uint8_t FAN_RELAY_PIN = 21;
+constexpr uint8_t LIGHT_RELAY_PIN = 27;
+constexpr uint8_t FAN_RELAY_PIN = 26;
 constexpr uint8_t LIGHT_TOUCH_PIN = 18;
 constexpr uint8_t FAN_TOUCH_PIN = 19;
+// Change these only when the MQ-2 module is physically connected.
 constexpr uint8_t MQ2_ANALOG_PIN = 34;
 constexpr uint8_t MQ2_DIGITAL_PIN = 4;
 constexpr uint8_t LDR_PIN = 35;
 #if ENABLE_DHT_SENSOR
-constexpr uint8_t DHT_PIN = 23;
+constexpr uint8_t DHT_PIN = 32;
 constexpr uint8_t DHT_TYPE = DHT11;
 DHT dht(DHT_PIN, DHT_TYPE);
 #endif
@@ -51,8 +65,8 @@ constexpr unsigned long DEBOUNCE_MS = 250;
 WebSocketsClient webSocket;
 bool lightState = false;
 bool fanState = false;
-bool previousLightTouch = HIGH;
-bool previousFanTouch = HIGH;
+bool previousLightTouch = LOW;
+bool previousFanTouch = LOW;
 unsigned long previousSensorPost = 0;
 unsigned long previousLightPress = 0;
 unsigned long previousFanPress = 0;
@@ -87,6 +101,7 @@ void publishRelayStatus() {
   String payload;
   serializeJson(document, payload);
   webSocket.sendTXT(payload);
+  Serial.printf("[WS] Status published: light=%s fan=%s\n", lightState ? "ON" : "OFF", fanState ? "ON" : "OFF");
 }
 
 void handleRelayCommand(const JsonDocument& document) {
@@ -100,13 +115,18 @@ void handleRelayCommand(const JsonDocument& document) {
   } else {
     return;
   }
+  Serial.printf("[WS] Command received: %s -> %s\n", device, enabled ? "ON" : "OFF");
   publishRelayStatus();
 }
 
 void webSocketEvent(WStype_t type, uint8_t* payload, size_t length) {
   if (type == WStype_CONNECTED) {
-    Serial.println("[WS] Relay backend connected");
+    Serial.printf("[WS] Relay backend connected: ws://%s:%u/ws/relay\n", BACKEND_HOST, BACKEND_PORT);
     publishRelayStatus();
+    return;
+  }
+  if (type == WStype_DISCONNECTED) {
+    Serial.println("[WS] Relay backend disconnected; retrying automatically");
     return;
   }
   if (type != WStype_TEXT) return;
@@ -130,21 +150,36 @@ void webSocketEvent(WStype_t type, uint8_t* payload, size_t length) {
 void connectWifi() {
   WiFi.mode(WIFI_STA);
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
-  Serial.print("[WIFI] Connecting");
-  while (WiFi.status() != WL_CONNECTED) {
+  Serial.printf("[WIFI] Connecting to %s", WIFI_SSID);
+  const unsigned long started = millis();
+  while (WiFi.status() != WL_CONNECTED && millis() - started < 20000) {
     delay(500);
     Serial.print(".");
   }
-  Serial.printf("\n[WIFI] Connected: %s\n", WiFi.localIP().toString().c_str());
+  if (WiFi.status() == WL_CONNECTED) {
+    Serial.printf("\n[WIFI] Connected: %s, gateway: %s\n", WiFi.localIP().toString().c_str(), WiFi.gatewayIP().toString().c_str());
+  } else {
+    Serial.println("\n[WIFI] Connection timed out; will retry");
+    WiFi.disconnect();
+  }
 }
 
 void postSensorData() {
   if (WiFi.status() != WL_CONNECTED) return;
 
   StaticJsonDocument<256> document;
+#if ENABLE_MQ2_SENSOR
   document["mqAnalog"] = analogRead(MQ2_ANALOG_PIN);
   document["mqDigital"] = digitalRead(MQ2_DIGITAL_PIN);
+#else
+  document["mqAnalog"] = 0;
+  document["mqDigital"] = 0;
+#endif
+#if ENABLE_LDR_SENSOR
   document["ldr"] = analogRead(LDR_PIN);
+#else
+  document["ldr"] = 0;
+#endif
 #if ENABLE_DHT_SENSOR
   const float temperature = dht.readTemperature();
   const float humidity = dht.readHumidity();
@@ -161,7 +196,7 @@ void postSensorData() {
   http.begin(backendHttpUrl("/sensors/data"));
   http.addHeader("Content-Type", "application/json");
   const int statusCode = http.POST(body);
-  Serial.printf("[HTTP] sensor update: %d\n", statusCode);
+  Serial.printf("[HTTP] Sensor update %d: %s\n", statusCode, body.c_str());
   http.end();
 }
 
@@ -170,13 +205,16 @@ void handleTouchInputs() {
   const bool lightTouch = digitalRead(LIGHT_TOUCH_PIN);
   const bool fanTouch = digitalRead(FAN_TOUCH_PIN);
 
-  if (lightTouch == LOW && previousLightTouch == HIGH && now - previousLightPress > DEBOUNCE_MS) {
+  // The original touch board outputs HIGH while touched.
+  if (lightTouch == HIGH && previousLightTouch == LOW && now - previousLightPress > DEBOUNCE_MS) {
     previousLightPress = now;
+    Serial.println("[TOUCH] Light touch detected");
     setLight(!lightState);
     publishRelayStatus();
   }
-  if (fanTouch == LOW && previousFanTouch == HIGH && now - previousFanPress > DEBOUNCE_MS) {
+  if (fanTouch == HIGH && previousFanTouch == LOW && now - previousFanPress > DEBOUNCE_MS) {
     previousFanPress = now;
+    Serial.println("[TOUCH] Fan touch detected");
     setFan(!fanState);
     publishRelayStatus();
   }
@@ -188,14 +226,20 @@ void setup() {
   Serial.begin(115200);
   pinMode(LIGHT_RELAY_PIN, OUTPUT);
   pinMode(FAN_RELAY_PIN, OUTPUT);
-  pinMode(LIGHT_TOUCH_PIN, INPUT_PULLUP);
-  pinMode(FAN_TOUCH_PIN, INPUT_PULLUP);
+  pinMode(LIGHT_TOUCH_PIN, INPUT);
+  pinMode(FAN_TOUCH_PIN, INPUT);
+#if ENABLE_MQ2_SENSOR
   pinMode(MQ2_DIGITAL_PIN, INPUT);
+#endif
   setLight(false);
   setFan(false);
 #if ENABLE_DHT_SENSOR
   dht.begin();
 #endif
+
+  Serial.println("[BOOT] Smart-home relay board starting");
+  Serial.println("[BOOT] Relay 1=light GPIO27, Relay 2=fan GPIO26, DHT11 GPIO32");
+  Serial.printf("[BOOT] MQ-2 enabled=%s, LDR enabled=%s\n", ENABLE_MQ2_SENSOR ? "yes" : "no", ENABLE_LDR_SENSOR ? "yes" : "no");
 
   connectWifi();
   webSocket.begin(BACKEND_HOST, BACKEND_PORT, "/ws/relay");

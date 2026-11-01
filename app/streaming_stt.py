@@ -44,6 +44,7 @@ class StreamingSpeechSession:
         self._input_closed = False
         self._finished = threading.Event()
         self._started_at = perf_counter()
+        self._last_audio_at = self._started_at
         self.received_bytes = 0
         self.received_frames = 0
 
@@ -76,6 +77,7 @@ class StreamingSpeechSession:
             return False
         self.received_bytes += len(pcm_audio)
         self.received_frames += 1
+        self._last_audio_at = perf_counter()
         return True
 
     def close_input(self) -> None:
@@ -95,6 +97,12 @@ class StreamingSpeechSession:
     @property
     def elapsed_seconds(self) -> float:
         return perf_counter() - self._started_at
+
+    @property
+    def seconds_since_last_audio(self) -> float:
+        """Age of the most recent ESP32 PCM frame for a stalled-stream guard."""
+
+        return perf_counter() - self._last_audio_at
 
     def _requests(self):
         while True:
