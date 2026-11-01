@@ -72,6 +72,7 @@ async def _answer_final_transcript(
     home_state: SmartHomeState = app_state.home_state
     cloud = app_state.google_cloud
     manager: RelayManager = app_state.relay_manager
+    knowledge_base = app_state.knowledge_base
 
     transcript = " ".join(transcript.split())
     if not transcript:
@@ -90,12 +91,15 @@ async def _answer_final_transcript(
     sensors = snapshot["sensors"]
     relays = snapshot["relays"]
     assert isinstance(sensors, dict) and isinstance(relays, dict)
+    knowledge_context = await asyncio.to_thread(knowledge_base.context_for, transcript)
+    if knowledge_context:
+        LOGGER.info("[%s] college knowledge context retrieved (%s chars)", session_id, len(knowledge_context))
 
     generation_started = perf_counter()
     try:
         model_reply = await asyncio.to_thread(
             cloud.generate_assistant_reply,
-            build_prompt(transcript, sensors, relays, commands, conversation_history),
+            build_prompt(transcript, sensors, relays, commands, conversation_history, knowledge_context),
         )
         reply = model_reply.display_text
         speech_reply = model_reply.speech_text

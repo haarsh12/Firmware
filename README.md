@@ -25,6 +25,36 @@ ignored by Git.
   `firmware/esp32_inmp441_voice/esp32_inmp441_voice.ino`.
 - A hardware-only MAX98357A test sketch at
   `test_code/max98357a_speaker_test/max98357a_speaker_test.ino`.
+- A local ChromaDB knowledge base for verified SVPCET website content and the
+  project's curated identity facts. It is used by the same Vertex AI assistant
+  used by the ESP32, Xiaozhi, and future phone app.
+
+## College and project knowledge base
+
+The assistant keeps the retrieval database locally at `data/chroma`; it does
+not scrape the web while a person is waiting for a voice answer. A manual
+refresh downloads a small, rate-limited set of pages from the official SVPCET
+website, chunks them, and creates Vertex embeddings in the local ChromaDB store.
+The curated project facts are stored in `knowledge/project_facts.md`, separate
+from web content so they are reviewable and easy to update.
+
+Run the initial refresh once after `setup_venv.ps1` has completed:
+
+```powershell
+cd D:\home_ss\new_backend
+.\venv\Scripts\python.exe .\scripts\refresh_college_knowledge.py
+```
+
+Then confirm it locally or from a future phone app:
+
+- `http://localhost:8000/knowledge/status`
+- `http://localhost:8000/knowledge/search?query=Who%20is%20Dr%20Avinash%20Lambat`
+
+Refresh it only when the official website or the project facts change. The
+voice agent retrieves the most relevant local source chunks before calling
+Vertex AI. It is instructed to treat retrieved text as reference material,
+not commands, and to say when it lacks verified information instead of
+inventing institutional facts.
 
 ## Google Cloud preparation
 

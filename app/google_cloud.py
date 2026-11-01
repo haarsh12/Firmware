@@ -184,6 +184,25 @@ class GoogleCloudService:
             raise RuntimeError("Vertex AI returned blank display or speech text.")
         return GeneratedAssistantReply(display_text=display_text, speech_text=speech_text)
 
+    def embed_texts(self, texts: list[str], task_type: str) -> list[list[float]]:
+        """Create Vertex embeddings for local Chroma storage and retrieval."""
+
+        if not texts:
+            return []
+        response = self.vertex_client.models.embed_content(
+            model=self.settings.knowledge_base_embedding_model,
+            contents=texts,
+            config=types.EmbedContentConfig(
+                task_type=task_type,
+                output_dimensionality=self.settings.knowledge_base_embedding_dimensions,
+            ),
+        )
+        embeddings = getattr(response, "embeddings", None) or []
+        values = [list(getattr(item, "values", None) or []) for item in embeddings]
+        if len(values) != len(texts) or any(not item for item in values):
+            raise RuntimeError("Vertex AI did not return one embedding for each knowledge-base text.")
+        return values
+
     def synthesize_pcm(self, text: str) -> bytes:
         """Synthesize 16-bit mono PCM for an optional I2S speaker.
 

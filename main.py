@@ -13,8 +13,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.config import get_settings
 from app.google_cloud import GoogleCloudService
 from app.relay_manager import RelayManager
-from app.routers import sensors, speaker_test, voice
+from app.routers import knowledge, sensors, speaker_test, voice
 from app.state import SmartHomeState
+from app.knowledge_base import CollegeKnowledgeBase
 from xiaozhi_connect.mcp_server import router as xiaozhi_mcp_router
 from xiaozhi_connect.outbound_bridge import XiaozhiOutboundBridge
 
@@ -32,6 +33,7 @@ settings = get_settings()
 home_state = SmartHomeState()
 google_cloud = GoogleCloudService(settings)
 relay_manager = RelayManager(settings, home_state)
+knowledge_base = CollegeKnowledgeBase(settings, google_cloud)
 
 
 @asynccontextmanager
@@ -67,6 +69,7 @@ app.state.settings = settings
 app.state.home_state = home_state
 app.state.google_cloud = google_cloud
 app.state.relay_manager = relay_manager
+app.state.knowledge_base = knowledge_base
 app.state.google_cloud_configured = False
 app.state.google_cloud_detail = "Startup validation has not run."
 app.state.xiaozhi_bridge = None
@@ -85,6 +88,7 @@ app.add_middleware(
 app.include_router(sensors.router)
 app.include_router(voice.router)
 app.include_router(speaker_test.router)
+app.include_router(knowledge.router)
 app.include_router(xiaozhi_mcp_router)
 
 
@@ -113,6 +117,10 @@ async def health() -> dict[str, object]:
         "google_cloud_configured": app.state.google_cloud_configured,
         "google_cloud_detail": app.state.google_cloud_detail,
         "relay_board_connections": await relay_manager.connection_count(),
+        "knowledge_base": {
+            "enabled": settings.knowledge_base_enabled,
+            "chunks": knowledge_base.count(),
+        },
         "xiaozhi_mcp_enabled": settings.xiaozhi_mcp_enabled,
         "xiaozhi_outbound_bridge": (
             app.state.xiaozhi_bridge.status.public_dict()

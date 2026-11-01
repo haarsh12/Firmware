@@ -29,6 +29,7 @@ build/
 *.wav
 *.pcm
 *.mp3
+data/chroma/
 
 # IDE and OS
 .vscode/

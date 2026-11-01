@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request, status
 
+from app.knowledge_base import CollegeKnowledgeBase
 from app.relay_manager import RelayManager, RelayUnavailableError
 from app.state import SmartHomeState
 
@@ -18,7 +20,18 @@ _TOOLS = [
     {"name": "set_light", "description": "Turn the home light relay on or off. Relay 1 is the light.", "inputSchema": {"type": "object", "properties": {"state": {"type": "boolean", "description": "true = on; false = off"}}, "required": ["state"], "additionalProperties": False}},
     {"name": "set_fan", "description": "Turn the home fan relay on or off. Relay 2 is the fan.", "inputSchema": {"type": "object", "properties": {"state": {"type": "boolean", "description": "true = on; false = off"}}, "required": ["state"], "additionalProperties": False}},
     {"name": "get_home_status", "description": "Read light, fan, relay-board connection, DHT11 temperature/humidity, and available MQ-2 gas sensor values. Never changes a device.", "inputSchema": {"type": "object", "properties": {}, "additionalProperties": False}},
+    {"name": "get_project_identity", "description": "Get the exact verified identity of this SVPCET E&TC mini project: team members, technologies, and purpose. Use for questions such as who made you, your name, which AI model you use, or what project you are.", "inputSchema": {"type": "object", "properties": {}, "additionalProperties": False}},
+    {"name": "search_college_knowledge", "description": "Search the backend's full local ChromaDB knowledge base for verified SVPCET college, E&TC department, faculty, laboratory, project, admission, or location information. Use before answering any such question, including spoken Hindi name variations.", "inputSchema": {"type": "object", "properties": {"query": {"type": "string", "description": "The user's complete question, preserving spoken name variations."}}, "required": ["query"], "additionalProperties": False}},
 ]
+
+_IDENTITY_TEXT = (
+    "This is the SVPCET E&TC Home-Automation Voice Assistant, an Electronics and "
+    "Telecommunication Department mini project at St. Vincent Pallotti College of "
+    "Engineering and Technology, Nagpur. It was developed by Harsh Sathawane, Hashir "
+    "Khan, Vedant Bhaganagre, and Rishika Appa. It is a custom student-built system "
+    "using Google Vertex AI Gemini, Google Speech-to-Text, and Google Text-to-Speech; "
+    "the team did not train a foundation model from scratch."
+)
 
 
 def _response(request_id: Any, result: dict[str, Any]) -> dict[str, Any]:
@@ -41,9 +54,33 @@ def _authorized(request: Request) -> bool:
 
 
 async def call_home_tool(
-    manager: RelayManager, home_state: SmartHomeState, name: str, arguments: object
+    manager: RelayManager,
+    home_state: SmartHomeState,
+    knowledge_base: CollegeKnowledgeBase,
+    name: str,
+    arguments: object,
 ) -> dict[str, Any]:
-    """Execute the only three tools exposed to either Xiaozhi transport."""
+    """Execute safe home-control and read-only knowledge tools."""
+
+    if name == "get_project_identity":
+        LOGGER.info("Xiaozhi MCP tool get_project_identity")
+        return {"content": [{"type": "text", "text": _IDENTITY_TEXT}]}
+
+    if name == "search_college_knowledge":
+        if not isinstance(arguments, dict) or not isinstance(arguments.get("query"), str):
+            return {"content": [{"type": "text", "text": "Argument query must be a question string."}], "isError": True}
+        query = arguments["query"].strip()
+        if not query:
+            return {"content": [{"type": "text", "text": "Please provide a non-empty query."}], "isError": True}
+        hits = await asyncio.to_thread(knowledge_base.retrieve, query)
+        if not hits:
+            LOGGER.warning("Xiaozhi knowledge search returned no results: %s", query)
+            return {"content": [{"type": "text", "text": "No verified local knowledge-base result was found."}], "isError": True}
+        evidence = "\n\n".join(
+            f"Source: {hit.title}\n{hit.text[:850]}" for hit in hits[:3]
+        )
+        LOGGER.info("Xiaozhi knowledge search: %r -> %s result(s)", query, len(hits))
+        return {"content": [{"type": "text", "text": evidence}]}
 
     if name == "get_home_status":
         snapshot = await home_state.snapshot()
@@ -69,7 +106,11 @@ async def call_home_tool(
 
 async def _call_tool(request: Request, name: str, arguments: object) -> dict[str, Any]:
     return await call_home_tool(
-        request.app.state.relay_manager, request.app.state.home_state, name, arguments
+        request.app.state.relay_manager,
+        request.app.state.home_state,
+        request.app.state.knowledge_base,
+        name,
+        arguments,
     )
 
 

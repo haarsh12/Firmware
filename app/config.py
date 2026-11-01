@@ -62,6 +62,16 @@ class Settings(BaseSettings):
     max_assistant_words: int = Field(default=45, ge=3, le=100)
     assistant_max_output_tokens: int = Field(default=512, ge=128, le=1024)
 
+    # Local college/project knowledge base. Web pages are ingested explicitly;
+    # normal voice queries only read the local ChromaDB vector database.
+    knowledge_base_enabled: bool = True
+    knowledge_base_directory: str = "data/chroma"
+    knowledge_base_collection: str = "svpcet_assistant"
+    knowledge_base_embedding_model: str = "gemini-embedding-001"
+    knowledge_base_embedding_dimensions: int = Field(default=768, ge=128, le=3072)
+    knowledge_base_results: int = Field(default=4, ge=1, le=8)
+    knowledge_base_max_context_chars: int = Field(default=5000, ge=500, le=12000)
+
     @property
     def is_production(self) -> bool:
         return self.app_env.strip().lower() in {"production", "prod"}
@@ -86,6 +96,11 @@ class Settings(BaseSettings):
         """Maximum mono PCM payload accepted from the ESP32 in one voice turn."""
 
         return self.voice_sample_rate * self.voice_sample_width * self.voice_max_audio_seconds
+
+    @property
+    def knowledge_base_path(self) -> Path:
+        path = Path(self.knowledge_base_directory).expanduser()
+        return path if path.is_absolute() else (PROJECT_ROOT / path).resolve()
 
 
 @lru_cache
