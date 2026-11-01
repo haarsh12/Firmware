@@ -10,7 +10,8 @@ from uuid import uuid4
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from app.assistant import build_prompt, fallback_assistant_reply, limit_reply
-from app.command_parser import parse_relay_commands
+from app.command_parser import parse_media_command, parse_relay_commands
+from app.media import MediaUnavailableError
 from app.relay_manager import RelayManager, RelayUnavailableError
 from app.state import SmartHomeState
 from app.streaming_stt import SpeechStreamEvent, StreamingSpeechSession
@@ -73,6 +74,7 @@ async def _answer_final_transcript(
     cloud = app_state.google_cloud
     manager: RelayManager = app_state.relay_manager
     knowledge_base = app_state.knowledge_base
+    desktop_media = app_state.desktop_media
 
     transcript = " ".join(transcript.split())
     if not transcript:
@@ -87,6 +89,37 @@ async def _answer_final_transcript(
     await _send_text(websocket, "STATUS:Thinking", send_lock)
 
     commands = parse_relay_commands(transcript)
+    media_command = parse_media_command(transcript)
+
+    # A direct media request is handled deterministically and immediately: the
+    # browser receives the action before any optional LLM response. This keeps
+    # the ESP32/Vertex path aligned with Xiaozhi's play_youtube MCP tool.
+    if media_command is not None:
+        try:
+            if media_command.action == "open":
+                await asyncio.to_thread(desktop_media.open_youtube)
+                reply = "YouTube laptop par khol diya hai."
+            else:
+                launch = await asyncio.to_thread(desktop_media.play, media_command.query)
+                reply = f"{launch.query} YouTube par laptop me chala raha hun."
+            LOGGER.info("[%s] desktop YouTube command completed: %s", session_id, media_command)
+        except MediaUnavailableError as exc:
+            LOGGER.warning("[%s] desktop YouTube command failed: %s", session_id, exc)
+            reply = str(exc)
+        reply = limit_reply(reply, settings.max_assistant_words)
+        conversation_history.append((transcript, reply))
+        del conversation_history[:-6]
+        await _send_text(websocket, f"REPLY:{reply}", send_lock)
+        await _send_text(websocket, f"LCD:{reply}", send_lock)
+        if settings.enable_cloud_tts:
+            await _send_text(websocket, "STATUS:Generating audio reply", send_lock)
+            try:
+                pcm_reply = await asyncio.to_thread(cloud.synthesize_pcm, reply)
+                await _send_audio(websocket, pcm_reply, send_lock)
+            except Exception:
+                LOGGER.exception("[%s] Cloud TTS failed for desktop media reply", session_id)
+        await _finish_voice_turn(websocket, send_lock)
+        return
     snapshot = await home_state.snapshot()
     sensors = snapshot["sensors"]
     relays = snapshot["relays"]

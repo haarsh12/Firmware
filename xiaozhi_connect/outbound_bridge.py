@@ -135,7 +135,7 @@ class XiaozhiOutboundBridge:
             LOGGER.info("Xiaozhi MCP session initialized; tools are ready.")
             return None
         if method == "tools/list":
-            LOGGER.info("Xiaozhi MCP tool discovery requested; advertising home controls and ChromaDB knowledge tools.")
+            LOGGER.info("Xiaozhi MCP tool discovery requested; advertising home controls, ChromaDB knowledge, and desktop YouTube tools.")
             return self._result(request_id, {"tools": _TOOLS})
         if method == "tools/call":
             if not isinstance(params, dict):
@@ -147,6 +147,7 @@ class XiaozhiOutboundBridge:
                 self._app.state.relay_manager,
                 self._app.state.home_state,
                 self._app.state.knowledge_base,
+                self._app.state.desktop_media,
                 tool_name,
                 params.get("arguments", {}),
             )

@@ -8,9 +8,15 @@ Electronics & Tele-Communication is an engineering department listed by the coll
 
 The official E&TC faculty listing identifies Dr. Harish V. Rajurkar as Associate Professor and Head of Department. He is the HOD of E&TC. Hindi spoken-name variants include डॉ. हरीश वी. राजूरकर, डॉ. हरीश राजूरकर, and हरीश राजूरकर.
 
+The official Director's Desk identifies Dr. Fr. Paul Chandrankunnel SAC as Director of St. Vincent Pallotti College of Engineering & Technology, Nagpur. Hindi spoken-name variants include Dr. Father Paul Chandrankunnel and Father Paul Chandrankunnel.
+
+The official Principal's Desk identifies Dr. Prashant Maheshwary as Principal of St. Vincent Pallotti College of Engineering & Technology, Nagpur. Hindi spoken-name variants include Dr. Prashant Maheshwary and Prashant Maheshwary.
+
 The official faculty profile identifies Dr. Avinash B. Lambat as an Assistant Professor in E&TC. It lists 27 years in academics and 2.1 years in industry. His listed interests are Microprocessor and Microcontroller, Embedded System, Microwave Engineering, and Digital Circuits. His listed qualifications are PhD (ETC), M.Tech (VLSI Design), and BE (ETC). Hindi spoken-name variants include डॉ. अविनाश बी. लाम्बट, डॉ. अविनाश लाम्बट, and अविनाश लाम्बट.
 
 Official sources:
 - https://www.stvincentngp.edu.in/
 - https://www.stvincentngp.edu.in/faculties/list/2
 - https://www.stvincentngp.edu.in/faculties/view/22
+- https://www.stvincentngp.edu.in/pages/director-desk
+- https://www.stvincentngp.edu.in/pages/principals-desk

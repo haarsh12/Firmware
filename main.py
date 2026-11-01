@@ -13,7 +13,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.config import get_settings
 from app.google_cloud import GoogleCloudService
 from app.relay_manager import RelayManager
-from app.routers import knowledge, sensors, speaker_test, voice
+from app.routers import knowledge, media, sensors, speaker_test, voice
+from app.media import DesktopMediaService
 from app.state import SmartHomeState
 from app.knowledge_base import CollegeKnowledgeBase
 from xiaozhi_connect.mcp_server import router as xiaozhi_mcp_router
@@ -34,6 +35,7 @@ home_state = SmartHomeState()
 google_cloud = GoogleCloudService(settings)
 relay_manager = RelayManager(settings, home_state)
 knowledge_base = CollegeKnowledgeBase(settings, google_cloud)
+desktop_media = DesktopMediaService(settings)
 
 
 @asynccontextmanager
@@ -70,6 +72,7 @@ app.state.home_state = home_state
 app.state.google_cloud = google_cloud
 app.state.relay_manager = relay_manager
 app.state.knowledge_base = knowledge_base
+app.state.desktop_media = desktop_media
 app.state.google_cloud_configured = False
 app.state.google_cloud_detail = "Startup validation has not run."
 app.state.xiaozhi_bridge = None
@@ -89,6 +92,7 @@ app.include_router(sensors.router)
 app.include_router(voice.router)
 app.include_router(speaker_test.router)
 app.include_router(knowledge.router)
+app.include_router(media.router)
 app.include_router(xiaozhi_mcp_router)
 
 

@@ -12,6 +12,14 @@ class ParsedRelayCommand:
     state: bool
 
 
+@dataclass(frozen=True, slots=True)
+class ParsedMediaCommand:
+    """An explicit request to control YouTube on the trusted backend laptop."""
+
+    action: str
+    query: str = ""
+
+
 _DEVICES = {
     "light": ("light", "batti", "bulb", "lamp", "roshni"),
     "fan": ("fan", "pankha"),
@@ -90,3 +98,52 @@ def parse_relay_commands(text: str) -> list[ParsedRelayCommand]:
             )
 
     return [command for _, command in sorted(commands_with_positions, key=lambda item: item[0])]
+
+
+def parse_media_command(text: str) -> ParsedMediaCommand | None:
+    """Recognise only clear YouTube play/open requests.
+
+    This deliberately requires an action and YouTube/song/video cue. It avoids
+    launching a browser for ordinary conversation that merely mentions music.
+    """
+
+    normalised = text.casefold()
+    replacements = {
+        "यूट्यूब": " youtube ",
+        "यू ट्यूब": " youtube ",
+        "गाना": " song ",
+        "सॉन्ग": " song ",
+        "वीडियो": " video ",
+        "चलाओ": " play ",
+        "बजाओ": " play ",
+        "खोलो": " open ",
+        "खोल": " open ",
+        "लगाओ": " play ",
+    }
+    for source, target in replacements.items():
+        normalised = normalised.replace(source, target)
+    normalised = re.sub(r"\s+", " ", normalised).strip()
+
+    has_youtube = "youtube" in normalised
+    has_play = bool(re.search(r"\b(play|chalao|bajao|lagao)\b", normalised))
+    has_open = bool(re.search(r"\b(open|kholo)\b", normalised))
+    has_media = bool(re.search(r"\b(song|music|video)\b", normalised))
+    if has_open and has_youtube and not has_play and not has_media:
+        return ParsedMediaCommand("open")
+    if not has_play or not (has_youtube or has_media):
+        return None
+
+    query = normalised
+    query = re.sub(r"\b(open|youtube|on|in|par|pe|play|song|music|video|please|karo|kar do)\b", " ", query)
+    query = re.sub(r"\s+", " ", query).strip(" .,!?:;'-")
+    # English commands often put the requested title after "play song". The
+    # original transcript retains its casing and is better for YouTube search.
+    original = " ".join(text.split()).strip()
+    title = re.sub(
+        r"(?i)\b(open\s+)?youtube(\s+and)?\s+(play\s+)?|\b(play|open)\s+(a\s+)?(song|music|video)\b|\b(play|open|chalao|bajao|lagao)\b|यूट्यूब|यू ट्यूब|गाना|सॉन्ग|वीडियो|चलाओ|बजाओ|खोलो|लगाओ",
+        " ",
+        original,
+    )
+    title = re.sub(r"(?i)\b(on|in|par|pe)\s+youtube\b|\byoutube\b", " ", title)
+    title = re.sub(r"\s+", " ", title).strip(" .,!?:;'-")
+    return ParsedMediaCommand("play", title or query)

@@ -72,6 +72,11 @@ class Settings(BaseSettings):
     knowledge_base_results: int = Field(default=4, ge=1, le=8)
     knowledge_base_max_context_chars: int = Field(default=5000, ge=500, le=12000)
 
+    # Desktop media control. It opens the locally configured default browser;
+    # this feature is deliberately disabled outside the trusted local machine.
+    desktop_media_enabled: bool = True
+    youtube_search_timeout_seconds: float = Field(default=8.0, ge=3.0, le=30.0)
+
     @property
     def is_production(self) -> bool:
         return self.app_env.strip().lower() in {"production", "prod"}

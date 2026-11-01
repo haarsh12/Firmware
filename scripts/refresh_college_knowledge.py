@@ -30,13 +30,15 @@ LOGGER = logging.getLogger("refresh_college_knowledge")
 HOST = "www.stvincentngp.edu.in"
 SEED_URLS = (
     "https://www.stvincentngp.edu.in/",
+    "https://www.stvincentngp.edu.in/pages/director-desk",
+    "https://www.stvincentngp.edu.in/pages/principals-desk",
     "https://www.stvincentngp.edu.in/faculties/view/22",
     "https://www.stvincentngp.edu.in/faculties/list/2",
 )
 # The seeds cover college identity, E&TC faculty, and the professor profile.
 # Crawl only a few linked official pages per refresh to keep embedding cost and
 # refresh time predictable; add verified URLs to SEED_URLS when needed.
-MAX_PAGES = 8
+MAX_PAGES = 12
 
 
 def allowed_url(url: str) -> bool:

@@ -9,6 +9,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Request, status
 
 from app.knowledge_base import CollegeKnowledgeBase
+from app.media import DesktopMediaService, MediaUnavailableError
 from app.relay_manager import RelayManager, RelayUnavailableError
 from app.state import SmartHomeState
 
@@ -22,6 +23,8 @@ _TOOLS = [
     {"name": "get_home_status", "description": "Read light, fan, relay-board connection, DHT11 temperature/humidity, and available MQ-2 gas sensor values. Never changes a device.", "inputSchema": {"type": "object", "properties": {}, "additionalProperties": False}},
     {"name": "get_project_identity", "description": "Get the exact verified identity of this SVPCET E&TC mini project: team members, technologies, and purpose. Use for questions such as who made you, your name, which AI model you use, or what project you are.", "inputSchema": {"type": "object", "properties": {}, "additionalProperties": False}},
     {"name": "search_college_knowledge", "description": "Search the backend's full local ChromaDB knowledge base for verified SVPCET college, E&TC department, faculty, laboratory, project, admission, or location information. Use before answering any such question, including spoken Hindi name variations.", "inputSchema": {"type": "object", "properties": {"query": {"type": "string", "description": "The user's complete question, preserving spoken name variations."}}, "required": ["query"], "additionalProperties": False}},
+    {"name": "play_youtube", "description": "On the backend laptop, open the default browser directly on the best YouTube match and request autoplay. Use only for an explicit request to play a song, music, or video.", "inputSchema": {"type": "object", "properties": {"query": {"type": "string", "description": "Song or video name to play on YouTube."}}, "required": ["query"], "additionalProperties": False}},
+    {"name": "open_youtube", "description": "Open YouTube on the backend laptop. Use only when the user explicitly asks to open YouTube without naming a song or video.", "inputSchema": {"type": "object", "properties": {}, "additionalProperties": False}},
 ]
 
 _IDENTITY_TEXT = (
@@ -57,10 +60,30 @@ async def call_home_tool(
     manager: RelayManager,
     home_state: SmartHomeState,
     knowledge_base: CollegeKnowledgeBase,
+    desktop_media: DesktopMediaService,
     name: str,
     arguments: object,
 ) -> dict[str, Any]:
     """Execute safe home-control and read-only knowledge tools."""
+
+    if name == "open_youtube":
+        try:
+            await asyncio.to_thread(desktop_media.open_youtube)
+        except MediaUnavailableError as exc:
+            return {"content": [{"type": "text", "text": str(exc)}], "isError": True}
+        return {"content": [{"type": "text", "text": "YouTube has been opened on the laptop."}]}
+
+    if name == "play_youtube":
+        if not isinstance(arguments, dict) or not isinstance(arguments.get("query"), str):
+            return {"content": [{"type": "text", "text": "Argument query must be a song or video name."}], "isError": True}
+        try:
+            launch = await asyncio.to_thread(desktop_media.play, arguments["query"])
+        except MediaUnavailableError as exc:
+            return {"content": [{"type": "text", "text": str(exc)}], "isError": True}
+        text = f"Opening YouTube for {launch.query} on the laptop."
+        if launch.direct_video:
+            text += " The matched video was opened with autoplay requested."
+        return {"content": [{"type": "text", "text": text}]}
 
     if name == "get_project_identity":
         LOGGER.info("Xiaozhi MCP tool get_project_identity")
@@ -109,6 +132,7 @@ async def _call_tool(request: Request, name: str, arguments: object) -> dict[str
         request.app.state.relay_manager,
         request.app.state.home_state,
         request.app.state.knowledge_base,
+        request.app.state.desktop_media,
         name,
         arguments,
     )

@@ -59,3 +59,7 @@ class RelayCommand(BaseModel):
 class DeviceAction(BaseModel):
     device: Literal["light", "fan"]
     action: Literal["on", "off"]
+
+
+class MediaPlayRequest(BaseModel):
+    query: str = Field(min_length=1, max_length=160)
