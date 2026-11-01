@@ -43,3 +43,28 @@ desktop.ini
 
 # Logs
 *.log
+
+# Flutter/Dart Frontend Application
+frontend_application/.dart_tool/
+frontend_application/.flutter-plugins
+frontend_application/.flutter-plugins-dependencies
+frontend_application/.metadata
+frontend_application/.packages
+frontend_application/build/
+frontend_application/ios/Flutter/.last_build_id
+frontend_application/ios/Pods/
+frontend_application/ios/.symlinks/
+frontend_application/android/app/debug/
+frontend_application/android/app/profile/
+frontend_application/android/app/release/
+frontend_application/android/.gradle/
+frontend_application/android/.kotlin/
+frontend_application/android/local.properties
+frontend_application/linux/flutter/
+frontend_application/macos/Flutter/
+frontend_application/windows/flutter/
+frontend_application/.pub-cache/
+frontend_application/pubspec.lock
+frontend_application/*.iml
+frontend_application/.idea/
+frontend_application/logs/

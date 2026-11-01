@@ -6,15 +6,15 @@
     - LiquidCrystal_I2C
 
   Pin map for this specific voice board:
-    TTP223 touch OUT   -> GPIO 18 (HIGH when touched)
-    Recording LED      -> GPIO 4
-    Ready LED          -> GPIO 5
-    Backend LED        -> GPIO 27 (ON only while /ws/voice is connected)
-    AI-response LED    -> GPIO 14 (ON while transcript/AI/TTS is processing)
+    TTP223 touch OUT   -> GPIO 5 (HIGH when touched)
+    Recording LED      -> GPIO 18
+    Ready LED          -> GPIO 19
+    Backend LED        -> GPIO 21 (ON only while /ws/voice is connected)
+    AI-response LED    -> GPIO 22 (ON while transcript/AI/TTS is processing)
 
-    INMP441: SCK -> GPIO 26, WS -> GPIO 25, SD -> GPIO 22
-    MAX98357A: BCLK -> GPIO 32, LRC/WS -> GPIO 33, DIN -> GPIO 19
-    LCD I2C: SDA -> GPIO 21, SCL -> GPIO 15
+    INMP441: SCK -> GPIO 26, WS -> GPIO 25, SD -> GPIO 32
+    MAX98357A: BCLK -> GPIO 14, LRC/WS -> GPIO 27, DIN -> GPIO 33
+    OLED I2C: SDA -> GPIO 4, SCL -> GPIO 15
 
   The backend address below is the laptop hotspot/LAN address supplied for
   this project. Change only if the laptop address changes.
@@ -34,24 +34,24 @@ const char* BACKEND_HOST = "192.168.50.207";  // Laptop Wi-Fi / hotspot IPv4
 const uint16_t BACKEND_PORT = 8000;
 // ---------------------------------------------------
 
-// Change 0x27 to 0x3F only if your LCD does not respond at 0x27.
-constexpr uint8_t LCD_ADDRESS = 0x27;
-constexpr uint8_t LCD_SDA_PIN = 21;
-constexpr uint8_t LCD_SCL_PIN = 15;
+// Change 0x3C to 0x3D if your OLED does not respond at 0x3C.
+constexpr uint8_t OLED_ADDRESS = 0x3C;
+constexpr uint8_t OLED_SDA_PIN = 4;
+constexpr uint8_t OLED_SCL_PIN = 15;
 
-constexpr uint8_t TOUCH_SENSOR_PIN = 18;
-constexpr uint8_t RECORDING_LED_PIN = 4;
-constexpr uint8_t READY_LED_PIN = 5;
-constexpr uint8_t BACKEND_LED_PIN = 27;
-constexpr uint8_t AI_RESPONSE_LED_PIN = 14;
+constexpr uint8_t TOUCH_SENSOR_PIN = 5;
+constexpr uint8_t RECORDING_LED_PIN = 18;
+constexpr uint8_t READY_LED_PIN = 19;
+constexpr uint8_t BACKEND_LED_PIN = 21;
+constexpr uint8_t AI_RESPONSE_LED_PIN = 22;
 
 constexpr uint8_t MIC_SCK_PIN = 26;
 constexpr uint8_t MIC_WS_PIN = 25;
-constexpr uint8_t MIC_SD_PIN = 22;
+constexpr uint8_t MIC_SD_PIN = 32;
 
-constexpr uint8_t SPEAKER_BCLK_PIN = 32;
-constexpr uint8_t SPEAKER_LRCK_PIN = 33;
-constexpr uint8_t SPEAKER_DIN_PIN = 19;
+constexpr uint8_t SPEAKER_BCLK_PIN = 14;
+constexpr uint8_t SPEAKER_LRCK_PIN = 27;
+constexpr uint8_t SPEAKER_DIN_PIN = 33;
 
 constexpr uint32_t SAMPLE_RATE = 16000;
 constexpr size_t MIC_FRAME_SAMPLES = 1600;      // 100 ms at 16 kHz
@@ -71,7 +71,7 @@ constexpr bool SPEAKER_DIAGNOSTIC_TONE = true;
 enum VoiceState { DISCONNECTED, IDLE, RECORDING, PROCESSING, PLAYING };
 
 WebSocketsClient webSocket;
-LiquidCrystal_I2C lcd(LCD_ADDRESS, 16, 2);
+LiquidCrystal_I2C lcd(OLED_ADDRESS, 16, 2);
 VoiceState voiceState = DISCONNECTED;
 
 bool previousTouchState = false;
@@ -582,7 +582,7 @@ void setup() {
   setAiResponding(false);
   setVoiceState(DISCONNECTED);
 
-  Wire.begin(LCD_SDA_PIN, LCD_SCL_PIN);
+  Wire.begin(OLED_SDA_PIN, OLED_SCL_PIN);
   lcd.init();
   lcd.backlight();
   showLcdStatus("AI Home", "Starting...");
