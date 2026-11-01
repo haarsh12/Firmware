@@ -20,6 +20,7 @@ __pycache__/
 htmlcov/
 venv/
 .venv/
+livekit_venv/
 *.egg-info/
 dist/
 build/

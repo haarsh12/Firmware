@@ -77,6 +77,22 @@ class Settings(BaseSettings):
     desktop_media_enabled: bool = True
     youtube_search_timeout_seconds: float = Field(default=8.0, ge=3.0, le=30.0)
 
+    # LiveKit powers the Flutter voice conversation only. It is separate from
+    # the ESP32 WebSocket voice flow and Xiaozhi MCP bridge.
+    livekit_enabled: bool = False
+    livekit_url: str = ""
+    livekit_api_key: str = ""
+    livekit_api_secret: str = ""
+    livekit_agent_name: str = "svpcet-home-agent"
+    livekit_token_ttl_minutes: int = Field(default=15, ge=5, le=60)
+    livekit_local_backend_url: str = "http://127.0.0.1:8000"
+
+    @property
+    def livekit_configured(self) -> bool:
+        return self.livekit_enabled and bool(
+            self.livekit_url.strip() and self.livekit_api_key.strip() and self.livekit_api_secret.strip()
+        )
+
     @property
     def is_production(self) -> bool:
         return self.app_env.strip().lower() in {"production", "prod"}

@@ -12,3 +12,7 @@ websockets>=13.0,<16.0
 chromadb>=0.5,<1.0
 # ChromaDB 0.6.x calls the pre-v4 PostHog telemetry API.
 posthog>=2.4,<4
+# The FastAPI backend issues short-lived LiveKit room tokens. The streaming
+# agent is installed in its own `livekit_venv` so its newer Google SDK cannot
+# disturb the working ESP32/Vertex backend environment.
+livekit-api==1.2.2

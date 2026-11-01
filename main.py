@@ -13,7 +13,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.config import get_settings
 from app.google_cloud import GoogleCloudService
 from app.relay_manager import RelayManager
-from app.routers import knowledge, media, sensors, speaker_test, voice
+from app.routers import knowledge, livekit_mobile, media, sensors, speaker_test, voice
 from app.media import DesktopMediaService
 from app.state import SmartHomeState
 from app.knowledge_base import CollegeKnowledgeBase
@@ -93,6 +93,7 @@ app.include_router(voice.router)
 app.include_router(speaker_test.router)
 app.include_router(knowledge.router)
 app.include_router(media.router)
+app.include_router(livekit_mobile.router)
 app.include_router(xiaozhi_mcp_router)
 
 
@@ -126,6 +127,7 @@ async def health() -> dict[str, object]:
             "chunks": knowledge_base.count(),
         },
         "xiaozhi_mcp_enabled": settings.xiaozhi_mcp_enabled,
+        "livekit_mobile_voice": {"enabled": settings.livekit_enabled, "configured": settings.livekit_configured},
         "xiaozhi_outbound_bridge": (
             app.state.xiaozhi_bridge.status.public_dict()
             if app.state.xiaozhi_bridge is not None
