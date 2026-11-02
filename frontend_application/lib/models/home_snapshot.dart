@@ -29,7 +29,10 @@ class HomeSnapshot {
     num number(Object? value) => value is num ? value : num.tryParse('$value') ?? 0;
     return HomeSnapshot(
       backendOnline: health['status'] == 'healthy' || health['status'] == 'online',
-      relayBoardConnected: number(health['relay_board_connections']).toInt() > 0,
+      // A relay can be reachable through its reliable HTTP polling fallback
+      // when a phone hotspot/router rejects a persistent WebSocket upgrade.
+      relayBoardConnected: health['relay_board_connected'] == true ||
+          number(health['relay_board_connections']).toInt() > 0,
       lightOn: relays['light'] == true,
       fanOn: relays['fan'] == true,
       temperature: number(sensors['temperature']).toDouble(),

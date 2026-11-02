@@ -26,12 +26,18 @@ class VoiceProvider extends ChangeNotifier {
 
   bool get isListening => phase == VoicePhase.listening;
   bool get isBusy => phase == VoicePhase.thinking || phase == VoicePhase.speaking;
+  bool get isActive => phase == VoicePhase.listening || isBusy;
 
   Future<void> toggle() async {
     try {
-      if (isListening) {
+      // The same circle is always the session control: a second tap ends a
+      // live conversation even while the agent is thinking or speaking.
+      if (isActive) {
+        phase = VoicePhase.idle;
+        status = 'Voice session band kiya gaya. Tap karke phir boliye.';
+        notifyListeners();
         await _service.stop();
-      } else if (!isBusy) {
+      } else {
         phase = VoicePhase.listening;
         status = 'Microphone connect ho raha hai...';
         notifyListeners();

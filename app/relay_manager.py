@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
+from collections import deque
 
 import httpx
 from fastapi import WebSocket
@@ -25,6 +27,31 @@ class RelayManager:
         self._state = state
         self._connections: list[WebSocket] = []
         self._connections_lock = asyncio.Lock()
+        self._pending_http_commands: deque[dict[str, object]] = deque()
+        self._pending_commands_lock = asyncio.Lock()
+        self._last_http_heartbeat = 0.0
+
+    async def note_http_heartbeat(self) -> None:
+        """Record a sensor POST from the relay board.
+
+        Some ESP32 networks permit normal HTTP while dropping a persistent
+        WebSocket upgrade.  A recent heartbeat is enough to use the board's
+        command-poll fallback safely.
+        """
+
+        self._last_http_heartbeat = time.monotonic()
+
+    async def http_board_connected(self) -> bool:
+        return (time.monotonic() - self._last_http_heartbeat) < 15.0
+
+    async def board_connected(self) -> bool:
+        return (await self.connection_count()) > 0 or await self.http_board_connected()
+
+    async def next_http_command(self) -> dict[str, object] | None:
+        """Return one queued command to a polling relay board, if available."""
+
+        async with self._pending_commands_lock:
+            return self._pending_http_commands.popleft() if self._pending_http_commands else None
 
     async def connect(self, websocket: WebSocket) -> None:
         await websocket.accept()
@@ -62,7 +89,13 @@ class RelayManager:
         payload = {"type": "relay_command", "device": device, "state": state}
         delivered = await self._send_to_websocket_clients(payload)
         if not delivered:
-            await self._send_http_fallback(device, state)
+            if await self.http_board_connected():
+                async with self._pending_commands_lock:
+                    # Preserve command order; this project has a single board.
+                    self._pending_http_commands.append(payload)
+                LOGGER.info("Queued %s=%s for relay ESP32 HTTP poll fallback", device, state)
+            else:
+                await self._send_http_fallback(device, state)
         await self._state.set_relay(device, state)
 
     async def _send_to_websocket_clients(self, payload: dict[str, object]) -> bool:

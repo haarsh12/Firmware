@@ -37,6 +37,7 @@ async def push_sensor_data(data: SensorData, request: Request) -> dict[str, str]
     """Accept sensor readings from either current or legacy ESP32 firmware."""
 
     await _state(request).set_sensors(data)
+    await _manager(request).note_http_heartbeat()
     LOGGER.info(
         "Relay ESP32 sensor update: temperature=%.1fC humidity=%.1f%% mq_analog=%s mq_digital=%s ldr=%s",
         data.temperature,
@@ -46,6 +47,16 @@ async def push_sensor_data(data: SensorData, request: Request) -> dict[str, str]
         data.ldr,
     )
     return {"status": "ok"}
+
+
+@router.get("/relay/next")
+async def poll_relay_command(request: Request) -> dict[str, object]:
+    """HTTP command fallback for boards that cannot retain `/ws/relay`."""
+
+    manager = _manager(request)
+    await manager.note_http_heartbeat()
+    command = await manager.next_http_command()
+    return command or {"type": "no_command"}
 
 
 @router.get("/sensors/latest")
@@ -95,7 +106,7 @@ async def phone_device_control(action: DeviceAction, request: Request) -> dict[s
 @router.get("/api/device/status")
 async def device_status(request: Request) -> dict[str, bool | int]:
     relays = await _state(request).relays()
-    return {**relays, "wifi_connected": (await _manager(request).connection_count()) > 0}
+    return {**relays, "wifi_connected": await _manager(request).board_connected()}
 
 
 @router.post("/api/device/status")
@@ -125,7 +136,7 @@ async def app_relay(command: RelayCommand, request: Request) -> dict[str, object
 async def app_status(request: Request) -> dict[str, object]:
     return {
         "status": "online",
-        "relay_board_connected": (await _manager(request).connection_count()) > 0,
+        "relay_board_connected": await _manager(request).board_connected(),
     }
 
 

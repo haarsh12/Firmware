@@ -53,7 +53,7 @@ class VoiceAssistantScreen extends StatelessWidget {
                 const SizedBox(height: 10),
                 Text(voice.status, textAlign: TextAlign.center, style: TextStyle(fontWeight: FontWeight.w600, color: _statusColor(voice.phase))),
                 const SizedBox(height: 6),
-                Text(voice.isListening ? 'Tap to stop and send' : 'Tap the wave to speak', style: const TextStyle(color: Color(0xFF8A909A))),
+                Text(voice.isActive ? 'Tap the wave to stop this conversation' : 'Tap the wave to speak', style: const TextStyle(color: Color(0xFF8A909A))),
               ]),
             ),
           ],

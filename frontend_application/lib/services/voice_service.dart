@@ -22,6 +22,7 @@ class VoiceService {
   EventsListener<RoomEvent>? _listener;
   bool _initialised = false;
   bool _connecting = false;
+  bool _stopRequested = false;
   final Set<String> _seenFinalMessages = <String>{};
 
   Stream<VoiceUpdate> get updates => _state.stream;
@@ -29,10 +30,12 @@ class VoiceService {
   Future<void> start() async {
     if (_connecting || _room?.connectionState == ConnectionState.connected) return;
     _connecting = true;
+    _stopRequested = false;
     _state.add(const VoiceUpdate.phase(VoicePhase.thinking, 'Voice agent se connect ho raha hai...'));
 
     try {
       final credentials = await _requestToken();
+      if (_stopRequested) return;
       final serverUrl = credentials['server_url']?.toString() ?? '';
       final token = credentials['participant_token']?.toString() ?? '';
       if (serverUrl.isEmpty || token.isEmpty) {
@@ -43,7 +46,9 @@ class VoiceService {
         await LiveKitClient.initialize();
         _initialised = true;
       }
+      if (_stopRequested) return;
       await _disconnect();
+      if (_stopRequested) return;
 
       final room = Room();
       final listener = room.createListener();
@@ -57,6 +62,10 @@ class VoiceService {
       _room = room;
       _listener = listener;
       await room.connect(serverUrl, token);
+      if (_stopRequested) {
+        await _disconnect();
+        return;
+      }
       final participant = room.localParticipant;
       if (participant == null) {
         throw StateError('Voice room mein microphone participant nahi mila.');
@@ -113,6 +122,7 @@ class VoiceService {
   }
 
   Future<void> stop() async {
+    _stopRequested = true;
     final participant = _room?.localParticipant;
     if (participant != null) await participant.setMicrophoneEnabled(false);
     await _disconnect();

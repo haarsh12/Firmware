@@ -122,6 +122,7 @@ async def health() -> dict[str, object]:
         "google_cloud_configured": app.state.google_cloud_configured,
         "google_cloud_detail": app.state.google_cloud_detail,
         "relay_board_connections": await relay_manager.connection_count(),
+        "relay_board_connected": await relay_manager.board_connected(),
         "knowledge_base": {
             "enabled": settings.knowledge_base_enabled,
             "chunks": knowledge_base.count(),

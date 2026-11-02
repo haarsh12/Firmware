@@ -36,7 +36,7 @@ const char* WIFI_SSID = "Harsh's Galaxy A21s";
 const char* WIFI_PASSWORD = "datachor";
 // Current laptop Wi-Fi IPv4 as of the last backend configuration. Change this
 // only if Windows reports a different Wi-Fi IPv4 address after reconnecting.
-const char* BACKEND_HOST = "192.168.50.207";
+const char* BACKEND_HOST = "192.168.112.207";
 const uint16_t BACKEND_PORT = 8000;
 // ----------------------------------------
 
@@ -60,6 +60,7 @@ DHT dht(DHT_PIN, DHT_TYPE);
 #endif
 
 constexpr unsigned long SENSOR_INTERVAL_MS = 5000;
+constexpr unsigned long COMMAND_POLL_INTERVAL_MS = 350;
 constexpr unsigned long DEBOUNCE_MS = 250;
 
 WebSocketsClient webSocket;
@@ -68,6 +69,7 @@ bool fanState = false;
 bool previousLightTouch = LOW;
 bool previousFanTouch = LOW;
 unsigned long previousSensorPost = 0;
+unsigned long previousCommandPoll = 0;
 unsigned long previousLightPress = 0;
 unsigned long previousFanPress = 0;
 
@@ -200,6 +202,29 @@ void postSensorData() {
   http.end();
 }
 
+// Reliable fallback when a router/hotspot permits HTTP but drops the long-lived
+// WebSocket upgrade. It also lets the backend mark this board as connected.
+void pollRelayCommand() {
+  if (WiFi.status() != WL_CONNECTED) return;
+
+  HTTPClient http;
+  http.setTimeout(1200);
+  http.begin(backendHttpUrl("/relay/next"));
+  const int statusCode = http.GET();
+  if (statusCode == HTTP_CODE_OK) {
+    const String body = http.getString();
+    StaticJsonDocument<256> document;
+    const DeserializationError error = deserializeJson(document, body);
+    if (!error && strcmp(document["type"] | "", "relay_command") == 0) {
+      Serial.printf("[HTTP] Command received: %s -> %s\n", document["device"] | "", document["state"].as<bool>() ? "ON" : "OFF");
+      handleRelayCommand(document);
+    }
+  } else if (statusCode > 0) {
+    Serial.printf("[HTTP] Command poll failed: %d\n", statusCode);
+  }
+  http.end();
+}
+
 void handleTouchInputs() {
   const unsigned long now = millis();
   const bool lightTouch = digitalRead(LIGHT_TOUCH_PIN);
@@ -254,6 +279,10 @@ void loop() {
   if (millis() - previousSensorPost >= SENSOR_INTERVAL_MS) {
     previousSensorPost = millis();
     postSensorData();
+  }
+  if (millis() - previousCommandPoll >= COMMAND_POLL_INTERVAL_MS) {
+    previousCommandPoll = millis();
+    pollRelayCommand();
   }
   delay(5);
 }
